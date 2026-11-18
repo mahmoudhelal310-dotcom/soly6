@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="ar"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>مشغّل رفيق المسلم</title>
+<style>html,body{margin:0;height:100%;background:#000;overflow:hidden}#p{position:absolute;inset:0;width:100%;height:100%;border:0}</style>
+</head><body><div id="p"></div>
+<script>
+/* مشغّل يوتيوب الرسمي داخل iframe، يتحدث مع الصفحة الأم برسائل:
+   خارج: {src:'athar-yt', type:'time'|'state'|'error', ...}    داخل: {dst:'athar-yt', cmd:'rate', v:1.5}
+   المعاملات: v=رقم_الفيديو أو list=قائمة_التشغيل ، t=ثانية_البداية ، r=السرعة */
+(function () {
+  var q = new URLSearchParams(location.search);
+  var vid = (q.get('v') || '').replace(/[^\w-]/g, '');
+  var list = (q.get('list') || '').replace(/[^\w-]/g, '');
+  var start = Math.max(0, parseInt(q.get('t'), 10) || 0);
+  var rate = parseFloat(q.get('r')) || 1;
+  var player = null, tick = null, rateFor = '';
+  function post(m) { m.src = 'athar-yt'; try { parent.postMessage(m, '*'); } catch (e) {} }
+  function curId() { try { return player.getVideoData().video_id || vid; } catch (e) { return vid; } }
+  function sendTime() { try { var d = player.getDuration(); if (d > 0) post({ type: 'time', id: curId(), t: player.getCurrentTime(), d: d }); } catch (e) {} }
+  function applyRate() { try { var id = curId(); if (rateFor !== id) { rateFor = id; player.setPlaybackRate(rate); } } catch (e) {} }
+  var checkIds = (q.get('check') || '').split(',').map(function (s) { return s.replace(/[^\w-]/g, ''); }).filter(Boolean);
+  function runCheck() {
+    var i = -1, p, timer;
+    function report(ok, code, unk) { clearTimeout(timer); post({ type: 'check', id: checkIds[i], ok: ok, code: code || 0, unknown: !!unk }); next(); }
+    function next() {
+      i++; if (i >= checkIds.length) { post({ type: 'check-done' }); return; }
+      p.cueVideoById(checkIds[i]); timer = setTimeout(function () { report(true, 0, true); }, 8000);
+    }
+    p = new YT.Player('p', { width: '100%', height: '100%', playerVars: { playsinline: 1 }, events: {
+      onReady: next, onStateChange: function (e) { if (e.data === 5) report(true); }, onError: function (e) { report(false, e.data); } } });
+  }
+  window.onYouTubeIframeAPIReady = function () {
+    if (checkIds.length) return runCheck();
+    var vars = { autoplay: 1, playsinline: 1, rel: 0, modestbranding: 1, start: start };
+    if (/^https?:$/.test(location.protocol)) vars.origin = location.origin;
+    var cfg = { width: '100%', height: '100%', playerVars: vars, events: {
+      onReady: function () { applyRate(); },
+      onStateChange: function (e) {
+        post({ type: 'state', s: e.data });
+        if (e.data === 1) { applyRate(); if (!tick) tick = setInterval(sendTime, 5000); }
+        else { if (tick) { clearInterval(tick); tick = null; } if (e.data === 2 || e.data === 0) sendTime(); }
+      },
+      onError: function (e) { post({ type: 'error', code: e.data }); }
+    } };
+    if (list) { vars.listType = 'playlist'; vars.list = list; } else cfg.videoId = vid;
+    player = new YT.Player('p', cfg);
+  };
+  window.addEventListener('message', function (e) {
+    var m = e.data || {};
+    if (m.dst !== 'athar-yt') return;
+    if (m.cmd === 'rate') { rate = +m.v || 1; try { player.setPlaybackRate(rate); } catch (x) {} }
+  });
+  var s = document.createElement('script'); s.src = 'https://www.youtube.com/iframe_api'; document.head.appendChild(s);
+})();
+</script></body></html>
